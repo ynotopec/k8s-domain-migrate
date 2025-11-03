@@ -35,6 +35,13 @@ TMP_DIR="$(mktemp -d)"
 ALL_ING_JSON="$TMP_DIR/all-ing.json"
 PLAN_JSON="$TMP_DIR/plan.json"
 mkdir -p "$OUT_DIR"
+PLAN_SUMMARY_FILE="$OUT_DIR/before-inventory.txt"
+
+# Entête lisible pour le fichier d'inventaire (utilisé en plan et pour le résumé LLM)
+{
+  echo "| Namespace | Ingress | Hosts source | Hosts cibles |"
+  echo "|---|---|---|---|"
+} > "$PLAN_SUMMARY_FILE"
 
 # LLM optionnel pour résumer le plan (API compatible OpenAI)
 # Exemple d'environnement :
@@ -266,9 +273,10 @@ if [[ "$AFFECTED" -eq 0 ]]; then
 fi
 
 info "Ingress candidats: $AFFECTED"
+
+info "Aperçu des Ingress source → hôtes actuels :"
 jq -r '.[] | "\(.metadata.namespace)/\(.metadata.name)  ->  " +
-  ( [.spec.rules[]?.host] | map(select(.!=null)) | join(",") )' "$PLAN_JSON" \
-  | tee "$OUT_DIR/before-inventory.txt"
+  ( [.spec.rules[]?.host] | map(select(.!=null)) | join(",") )' "$PLAN_JSON"
 
 ########################################
 # BUILD DES CLONES
@@ -392,6 +400,16 @@ build_clone_yaml() {
   ' "$src_file" >"$clone_json_file"
 
   json_to_yaml "$clone_json_file" "$ypath"
+
+  local old_hosts new_hosts
+  old_hosts="$(jq -r '[.spec.rules[]?.host] | map(select(.!=null)) | join(",")' "$src_file")"
+  new_hosts="$(jq -r '[.spec.rules[]?.host] | map(select(.!=null)) | join(",")' "$clone_json_file")"
+
+  [[ -z "$old_hosts" ]] && old_hosts="∅"
+  [[ -z "$new_hosts" ]] && new_hosts="∅"
+
+  printf '| %s | %s | %s | %s |\n' \
+    "$ns" "$orig_name" "$old_hosts" "$new_hosts" >> "$PLAN_SUMMARY_FILE"
 }
 
 info "Génération des manifests clones…"
@@ -401,6 +419,7 @@ done < <(jq -r '.[] | "\(.metadata.namespace) \(.metadata.name)"' "$PLAN_JSON")
 
 ls -1 "$OUT_DIR"/*-aidev.yaml > "$OUT_DIR/plan-files.txt"
 info "Manifests générés: $(wc -l < "$OUT_DIR/plan-files.txt") fichiers YAML"
+info "Inventaire source → cibles: $PLAN_SUMMARY_FILE"
 
 ########################################
 # MODES
