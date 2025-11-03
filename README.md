@@ -8,6 +8,22 @@ Script utilitaire pour dupliquer des Ingress Kubernetes vers un nouveau domaine 
 
 Le script peut fonctionner en mode plan (génération uniquement), appliquer les manifestes clonés, ou effectuer un rollback en supprimant les ressources dupliquées.
 
+## Diagramme de flux
+
+Le diagramme suivant illustre les grandes étapes lorsqu'on exécute le script en mode `--plan` suivi de `--apply` :
+
+```mermaid
+flowchart TD
+    A[Collecte des Ingress via kubectl] --> B[Filtrage par namespaces et labels]
+    B --> C[Réécriture des hôtes vers le domaine cible]
+    C --> D[Nettoyage des champs gérés par le serveur]
+    D --> E[Génération des manifestes YAML clonés]
+    E --> F{Mode}
+    F -- --plan --> G[Inventaire et artefacts de plan]
+    F -- --apply --> H[Application server-side des manifestes]
+    H --> I[Validation optionnelle par probes HTTP]
+```
+
 ## Prérequis
 
 - Accès `kubectl` configuré vers le cluster concerné
@@ -31,7 +47,7 @@ Le script peut fonctionner en mode plan (génération uniquement), appliquer les
 
 ## Modes
 
-Le premier argument définit le mode :
+Le premier argument définit le mode :
 
 - `--plan` (défaut) : récupère les Ingress, prépare les manifestes clonés et écrit un inventaire. Aucun changement n'est appliqué au cluster.
 - `--apply` : applique les manifestes générés en mode plan avec `kubectl apply --server-side --force-conflicts`.
@@ -39,7 +55,7 @@ Le premier argument définit le mode :
 
 ## Sorties
 
-Tous les artefacts sont stockés dans `OUT_DIR` :
+Tous les artefacts sont stockés dans `OUT_DIR` :
 
 - `plan-files.txt` : liste des manifestes générés.
 - `before-inventory.txt` et `after-ingresses.txt` : états avant/après des Ingress.
@@ -59,6 +75,10 @@ NAMESPACE_SEL="ai-.*" ./ingress-duplicate-ai-dev.sh --plan
 # Rollback des Ingress dupliqués
 ./ingress-duplicate-ai-dev.sh --rollback
 ```
+
+## Guide détaillé
+
+Pour un déroulé pas-à-pas couvrant la préparation de l'environnement, la revue du plan et la stratégie de rollback, consultez [docs/guide-migration.md](docs/guide-migration.md).
 
 ## Avertissements
 
