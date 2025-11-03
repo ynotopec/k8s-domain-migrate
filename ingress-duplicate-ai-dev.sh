@@ -60,29 +60,41 @@ require(){
 
 require kubectl
 require jq
-require yq
+# yq est optionnel : si indisponible, les manifests resteront en JSON (YAML valide)
+if command -v yq >/dev/null 2>&1; then
+  HAS_YQ=1
+else
+  warn "yq introuvable, les manifests seront générés en JSON (compatible YAML)."
+  HAS_YQ=0
+fi
 
 # Conversion JSON -> YAML compatible (go-yq ou python-yq)
 json_to_yaml() {
   local json_file="$1" yaml_file="$2"
-  local tmp_yaml
-  tmp_yaml="${yaml_file}.tmp"
 
-  # go-yq (mikefarah) : yq eval -P
-  if yq eval -P '.' "$json_file" >"$tmp_yaml" 2>/dev/null; then
-    mv "$tmp_yaml" "$yaml_file"
-    return 0
+  if [[ "$HAS_YQ" -eq 1 ]]; then
+    local tmp_yaml
+    tmp_yaml="${yaml_file}.tmp"
+
+    # go-yq (mikefarah) : yq eval -P
+    if yq eval -P '.' "$json_file" >"$tmp_yaml" 2>/dev/null; then
+      mv "$tmp_yaml" "$yaml_file"
+      return 0
+    fi
+
+    # python yq (kislyuk) : yq -y
+    if yq -y '.' "$json_file" >"$tmp_yaml" 2>/dev/null; then
+      mv "$tmp_yaml" "$yaml_file"
+      return 0
+    fi
+
+    rm -f "$tmp_yaml"
+    warn "Impossible de convertir ${json_file} en YAML avec yq, fallback JSON."
   fi
 
-  # python yq (kislyuk) : yq -y
-  if yq -y '.' "$json_file" >"$tmp_yaml" 2>/dev/null; then
-    mv "$tmp_yaml" "$yaml_file"
-    return 0
-  fi
-
-  rm -f "$tmp_yaml"
-  err "Impossible de convertir ${json_file} en YAML avec yq"
-  return 1
+  # Fallback : JSON est un sous-ensemble de YAML 1.2, on recopie simplement
+  cp "$json_file" "$yaml_file"
+  return 0
 }
 require curl
 
