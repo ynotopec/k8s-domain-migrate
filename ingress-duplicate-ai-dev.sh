@@ -244,12 +244,8 @@ build_clone_yaml() {
   local ypath="$OUT_DIR/${ns}-${name}-aidev.yaml"
 
   # Ingress source complet depuis all-ing.json
-  local safe_ns safe_name src_file
-  safe_ns="${ns//[^a-zA-Z0-9_.-]/_}"
-  safe_name="${name//[^a-zA-Z0-9_.-]/_}"
-  src_file="$(mktemp "$TMP_DIR/src-${safe_ns}-${safe_name}.XXXXXX.json")"
-
-  jq --arg ns "$ns" --arg name "$name" '
+  local src_json
+  src_json="$(jq -c --arg ns "$ns" --arg name "$name" '
     .items[] | select(.metadata.namespace==$ns and .metadata.name==$name)
   ' "$ALL_ING_JSON" >"$src_file"
 
@@ -300,7 +296,8 @@ build_clone_yaml() {
   fi
 
   # Transformation principale en une seule passe jq
-  jq \
+  local clone_json clean_json
+  clone_json="$(printf '%s\n' "$src_json" | jq \
     --arg dest_domain "$dest_domain" \
     --arg INGRESS_CLASS "$INGRESS_CLASS" \
     --arg CERT_ISSUER "$CERT_ISSUER" \
@@ -321,12 +318,17 @@ build_clone_yaml() {
       else . end
     | .spec.ingressClassName = ( .spec.ingressClassName // $INGRESS_CLASS )
 
-    # Hosts: on garde le prefix (avant le 1er point d origine), on remplace le domaine
-    | .spec.rules = ((.spec.rules // []) | map(
-        if has("host") and (.host != null) then
-          .host = ((.host | split(".") | .[0]) + "." + $dest_domain)
-        else . end
-      ))
+    # Hosts: on garde le prefix (avant le 1er point d'origine), on remplace le domaine
+    | .spec.rules = (
+        if (.spec.rules // [] | length) > 0 then
+          (.spec.rules // [] | map(
+            if has("host") and (.host != null) then
+              .host = ((.host | split(".") | .[0]) + "." + $dest_domain)
+            else . end
+          ))
+        else .spec.rules
+        end
+      )
 
     # TLS: hosts alignés sur le même dest_domain et secretName cohérent
     | .spec.tls = (
@@ -344,8 +346,11 @@ build_clone_yaml() {
         else null
         end
       )
-  ' "$src_file" \
-  | jq '
+  ')"
+
+  # Nettoyage des métadonnées runtime
+  clean_json="$(
+    printf '%s\n' "$clone_json" | jq '
       del(
         .metadata.uid,
         .metadata.resourceVersion,
@@ -357,8 +362,8 @@ build_clone_yaml() {
     ' \
   | yq -P '.' > "$ypath"
 
-  trap - RETURN
-  rm -f "$src_file"
+  # Sortie YAML
+  printf '%s\n' "$clean_json" | yq -P '.' > "$ypath"
 }
 
 info "Génération des manifests clones…"
