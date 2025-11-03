@@ -73,10 +73,10 @@ KSEL_OPTS=()
 [[ -n "$LABEL_SEL" ]] && KSEL_OPTS+=( -l "$LABEL_SEL" )
 
 # Filtre jq pour les namespaces
-jq_ns_filter='true'
+NS_REGEX=""
 if [[ -n "$NAMESPACE_SEL" ]]; then
-  ns_regex="$(echo "$NAMESPACE_SEL" | sed 's/,/|/g')"
-  jq_ns_filter="(.metadata.namespace | test(\"^(${ns_regex})$\"))"
+  ns_regex_body="$(echo "$NAMESPACE_SEL" | sed 's/,/|/g')"
+  NS_REGEX="^(${ns_regex_body})$"
 fi
 
 ########################################
@@ -196,9 +196,11 @@ kubectl get ing "${KNS_OPTS[@]}" "${KSEL_OPTS[@]}" -o json > "$ALL_ING_JSON"
 #   - .ai-dev.fake-domain.name
 #   - .cX.ai-dev.fake-domain.name (c0..c4)
 info "Filtrage des Ingress à dupliquer…"
-jq --arg base_domain "$BASE_DOMAIN" --arg ing_class "$INGRESS_CLASS" '
+jq --arg base_domain "$BASE_DOMAIN" --arg ing_class "$INGRESS_CLASS" --arg ns_regex "$NS_REGEX" '
   .items
-  | map(select('"$jq_ns_filter"'))
+  | map(select(
+      ($ns_regex == "") or (.metadata.namespace | test($ns_regex))
+    ))
   | map(select(
       ( .spec.ingressClassName? // "" ) as $c
       | ($ing_class == "" or $c == $ing_class)
@@ -245,20 +247,23 @@ build_clone_yaml() {
   local src_json
   src_json="$(jq -c --arg ns "$ns" --arg name "$name" '
     .items[] | select(.metadata.namespace==$ns and .metadata.name==$name)
-  ' "$ALL_ING_JSON")"
+  ' "$ALL_ING_JSON" >"$src_file"
 
-  if [[ -z "$src_json" || "$src_json" == "null" ]]; then
+  if [[ ! -s "$src_file" ]]; then
     warn "Ingress introuvable dans all-ing.json: ${ns}/${name}, ignoré."
+    rm -f "$src_file"
     return 0
   fi
 
+  trap 'rm -f "$src_file"' RETURN
+
   local orig_name
-  orig_name="$(jq -r '.metadata.name' <<<"$src_json")"
+  orig_name="$(jq -r '.metadata.name' "$src_file")"
 
   local labels annotations first_host
-  labels="$(jq -c '.metadata.labels // {}' <<<"$src_json")"
-  annotations="$(jq -c '.metadata.annotations // {}' <<<"$src_json")"
-  first_host="$(jq -r '[.spec.rules[]?.host] | map(select(.!=null)) | .[0] // ""' <<<"$src_json")"
+  labels="$(jq -c '.metadata.labels // {}' "$src_file")"
+  annotations="$(jq -c '.metadata.annotations // {}' "$src_file")"
+  first_host="$(jq -r '[.spec.rules[]?.host] | map(select(.!=null)) | .[0] // ""' "$src_file")"
 
   # Choix intelligent du domaine cible
   local dest_domain
@@ -280,7 +285,7 @@ build_clone_yaml() {
 
   # TLS : on regarde s'il y a des blocs TLS
   local has_tls
-  has_tls="$(jq '(.spec.tls // []) | length' <<<"$src_json")"
+  has_tls="$(jq '(.spec.tls // []) | length' "$src_file")"
 
   # Secret TLS cohérent avec le nouveau host (toujours initialisé)
   local tls_secret=""
@@ -354,8 +359,8 @@ build_clone_yaml() {
         .metadata.managedFields,
         .status
       )
-    '
-  )"
+    ' \
+  | yq -P '.' > "$ypath"
 
   # Sortie YAML
   printf '%s\n' "$clean_json" | yq -P '.' > "$ypath"
