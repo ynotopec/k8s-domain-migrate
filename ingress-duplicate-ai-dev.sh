@@ -245,7 +245,7 @@ build_clone_yaml() {
 
   # Ingress source complet depuis all-ing.json
   local src_json
-  src_json="$(jq -c --arg ns "$ns" --arg name "$name" '
+  src_json="$(jq -r --arg ns "$ns" --arg name "$name" '
     .items[] | select(.metadata.namespace==$ns and .metadata.name==$name)
   ' "$ALL_ING_JSON")"
 
@@ -294,7 +294,7 @@ build_clone_yaml() {
 
   # Transformation principale en une seule passe jq
   local clone_json clean_json
-  clone_json="$(printf '%s\n' "$src_json" | jq \
+  clone_json="$(echo "$src_json" | jq \
     --arg dest_domain "$dest_domain" \
     --arg INGRESS_CLASS "$INGRESS_CLASS" \
     --arg CERT_ISSUER "$CERT_ISSUER" \
@@ -316,21 +316,16 @@ build_clone_yaml() {
     | .spec.ingressClassName = ( .spec.ingressClassName // $INGRESS_CLASS )
 
     # Hosts: on garde le prefix (avant le 1er point d'origine), on remplace le domaine
-    | .spec.rules = (
-        if (.spec.rules // [] | length) > 0 then
-          (.spec.rules // [] | map(
-            if has("host") and (.host != null) then
-              .host = ((.host | split(".") | .[0]) + "." + $dest_domain)
-            else . end
-          ))
-        else .spec.rules
-        end
-      )
+    | .spec.rules = (.spec.rules | map(
+        if has("host") and (.host != null) then
+          .host = ((.host | split(".") | .[0]) + "." + $dest_domain)
+        else . end
+      ))
 
     # TLS: hosts alignés sur le même dest_domain et secretName cohérent
     | .spec.tls = (
         if (.spec.tls // [] | length) > 0 then
-          ((.spec.tls // []) | map(
+          (.spec.tls | map(
             .hosts = ((.hosts // []) | map(
               if . != null then
                 (split(".")[0]) + "." + $dest_domain
@@ -347,7 +342,7 @@ build_clone_yaml() {
 
   # Nettoyage des métadonnées runtime
   clean_json="$(
-    printf '%s\n' "$clone_json" | jq '
+    echo "$clone_json" | jq '
       del(
         .metadata.uid,
         .metadata.resourceVersion,
@@ -360,7 +355,7 @@ build_clone_yaml() {
   )"
 
   # Sortie YAML
-  printf '%s\n' "$clean_json" | yq -P '.' > "$ypath"
+  echo "$clean_json" | yq -P '.' > "$ypath"
 }
 
 info "Génération des manifests clones…"
