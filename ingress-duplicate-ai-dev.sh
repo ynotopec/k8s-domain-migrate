@@ -244,10 +244,12 @@ build_clone_yaml() {
   local ypath="$OUT_DIR/${ns}-${name}-aidev.yaml"
 
   # Ingress source complet depuis all-ing.json
+  local src_file="$TMP_DIR/${ns}-${name}.json"
   local src_json
   src_json="$(jq -c --arg ns "$ns" --arg name "$name" '
     .items[] | select(.metadata.namespace==$ns and .metadata.name==$name)
-  ' "$ALL_ING_JSON" >"$src_file"
+  ' "$ALL_ING_JSON")"
+  printf '%s\n' "$src_json" >"$src_file"
 
   if [[ ! -s "$src_file" ]]; then
     warn "Ingress introuvable dans all-ing.json: ${ns}/${name}, ignoré."
@@ -323,7 +325,7 @@ build_clone_yaml() {
         if (.spec.rules // [] | length) > 0 then
           (.spec.rules // [] | map(
             if has("host") and (.host != null) then
-              .host = ((.host | split(".") | .[0]) + "." + $dest_domain)
+              .host = ((.host | split("/") | last | split(".") | .[0]) + "." + $dest_domain)
             else . end
           ))
         else .spec.rules
@@ -336,7 +338,7 @@ build_clone_yaml() {
           ((.spec.tls // []) | map(
             .hosts = ((.hosts // []) | map(
               if . != null then
-                (split(".")[0]) + "." + $dest_domain
+                (. | split("/") | last | split(".") | .[0]) + "." + $dest_domain
               else . end
             ))
             | if ($tls_secret|length)>0 then
@@ -359,8 +361,8 @@ build_clone_yaml() {
         .metadata.managedFields,
         .status
       )
-    ' \
-  | yq -P '.' > "$ypath"
+    '
+  )"
 
   # Sortie YAML
   printf '%s\n' "$clean_json" | yq -P '.' > "$ypath"
