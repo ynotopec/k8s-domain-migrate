@@ -61,6 +61,29 @@ require(){
 require kubectl
 require jq
 require yq
+
+# Conversion JSON -> YAML compatible (go-yq ou python-yq)
+json_to_yaml() {
+  local json_file="$1" yaml_file="$2"
+  local tmp_yaml
+  tmp_yaml="${yaml_file}.tmp"
+
+  # go-yq (mikefarah) : yq eval -P
+  if yq eval -P '.' "$json_file" >"$tmp_yaml" 2>/dev/null; then
+    mv "$tmp_yaml" "$yaml_file"
+    return 0
+  fi
+
+  # python yq (kislyuk) : yq -y
+  if yq -y '.' "$json_file" >"$tmp_yaml" 2>/dev/null; then
+    mv "$tmp_yaml" "$yaml_file"
+    return 0
+  fi
+
+  rm -f "$tmp_yaml"
+  err "Impossible de convertir ${json_file} en YAML avec yq"
+  return 1
+}
 require curl
 
 # kubectl options
@@ -245,11 +268,9 @@ build_clone_yaml() {
 
   # Ingress source complet depuis all-ing.json
   local src_file="$TMP_DIR/${ns}-${name}.json"
-  local src_json
-  src_json="$(jq -c --arg ns "$ns" --arg name "$name" '
+  jq -c --arg ns "$ns" --arg name "$name" '
     .items[] | select(.metadata.namespace==$ns and .metadata.name==$name)
-  ' "$ALL_ING_JSON")"
-  printf '%s\n' "$src_json" >"$src_file"
+  ' "$ALL_ING_JSON" >"$src_file"
 
   if [[ ! -s "$src_file" ]]; then
     warn "Ingress introuvable dans all-ing.json: ${ns}/${name}, ignoré."
@@ -257,7 +278,8 @@ build_clone_yaml() {
     return 0
   fi
 
-  trap 'rm -f "$src_file"' RETURN
+  local clone_json_file="$TMP_DIR/${ns}-${name}-clone.json"
+  trap 'rm -f "$src_file" "$clone_json_file"' RETURN
 
   local orig_name
   orig_name="$(jq -r '.metadata.name' "$src_file")"
@@ -298,8 +320,7 @@ build_clone_yaml() {
   fi
 
   # Transformation principale en une seule passe jq
-  local clone_json clean_json
-  clone_json="$(printf '%s\n' "$src_json" | jq \
+  jq \
     --arg dest_domain "$dest_domain" \
     --arg INGRESS_CLASS "$INGRESS_CLASS" \
     --arg CERT_ISSUER "$CERT_ISSUER" \
@@ -320,7 +341,7 @@ build_clone_yaml() {
       else . end
     | .spec.ingressClassName = ( .spec.ingressClassName // $INGRESS_CLASS )
 
-    # Hosts: on garde le prefix (avant le 1er point d'origine), on remplace le domaine
+    # Hosts: on garde le prefix (avant le 1er point initial), on remplace le domaine
     | .spec.rules = (
         if (.spec.rules // [] | length) > 0 then
           (.spec.rules // [] | map(
@@ -348,12 +369,7 @@ build_clone_yaml() {
         else null
         end
       )
-  ')"
-
-  # Nettoyage des métadonnées runtime
-  clean_json="$(
-    printf '%s\n' "$clone_json" | jq '
-      del(
+    | del(
         .metadata.uid,
         .metadata.resourceVersion,
         .metadata.creationTimestamp,
@@ -361,11 +377,9 @@ build_clone_yaml() {
         .metadata.managedFields,
         .status
       )
-    '
-  )"
+  ' "$src_file" >"$clone_json_file"
 
-  # Sortie YAML
-  printf '%s\n' "$clean_json" | yq -P '.' > "$ypath"
+  json_to_yaml "$clone_json_file" "$ypath"
 }
 
 info "Génération des manifests clones…"
