@@ -73,10 +73,10 @@ KSEL_OPTS=()
 [[ -n "$LABEL_SEL" ]] && KSEL_OPTS+=( -l "$LABEL_SEL" )
 
 # Filtre jq pour les namespaces
-jq_ns_filter='true'
+NS_REGEX=""
 if [[ -n "$NAMESPACE_SEL" ]]; then
-  ns_regex="$(echo "$NAMESPACE_SEL" | sed 's/,/|/g')"
-  jq_ns_filter="(.metadata.namespace | test(\"^(${ns_regex})$\"))"
+  ns_regex_body="$(echo "$NAMESPACE_SEL" | sed 's/,/|/g')"
+  NS_REGEX="^(${ns_regex_body})$"
 fi
 
 ########################################
@@ -196,9 +196,11 @@ kubectl get ing "${KNS_OPTS[@]}" "${KSEL_OPTS[@]}" -o json > "$ALL_ING_JSON"
 #   - .ai-dev.fake-domain.name
 #   - .cX.ai-dev.fake-domain.name (c0..c4)
 info "Filtrage des Ingress à dupliquer…"
-jq --arg base_domain "$BASE_DOMAIN" --arg ing_class "$INGRESS_CLASS" '
+jq --arg base_domain "$BASE_DOMAIN" --arg ing_class "$INGRESS_CLASS" --arg ns_regex "$NS_REGEX" '
   .items
-  | map(select('"$jq_ns_filter"'))
+  | map(select(
+      ($ns_regex == "") or (.metadata.namespace | test($ns_regex))
+    ))
   | map(select(
       ( .spec.ingressClassName? // "" ) as $c
       | ($ing_class == "" or $c == $ing_class)
