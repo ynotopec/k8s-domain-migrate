@@ -19,9 +19,9 @@ flowchart TD
     C --> D[Nettoyage des champs gérés par le serveur]
     D --> E[Génération des manifestes YAML clonés]
     E --> F{Mode}
-    F -- --plan --> G[Inventaire et artefacts de plan]
-    F -- --apply --> H[Application server-side des manifestes]
-    H --> I[Validation optionnelle par probes HTTP]
+    F -->|--plan| G[Inventaire et artefacts de plan]
+    F -->|--apply| H[Application server-side des manifestes]
+    F -->|--rollback| I[Suppression des Ingress dupliqués]
 ```
 
 ## Prérequis
