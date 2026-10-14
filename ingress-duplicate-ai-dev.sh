@@ -443,7 +443,7 @@ if [[ "$MODE" == "--plan" ]]; then
     } > "$DIFF_EXPLAIN_FILE.input"
 
     api_base="${OPENAI_API_BASE%/}"
-    curl -sS "${api_base}/chat/completions" \
+    curl -sS --max-time 30 "${api_base}/chat/completions" \
       -H "Authorization: Bearer ${OPENAI_API_KEY}" \
       -H "Content-Type: application/json" \
       -d "$(jq -n \
